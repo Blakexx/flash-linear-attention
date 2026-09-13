@@ -38,6 +38,7 @@ from fla.models.path_attn import PaTHAttentionConfig, PaTHAttentionForCausalLM, 
 from fla.models.raven import RavenConfig, RavenForCausalLM, RavenModel
 from fla.models.retnet import RetNetConfig, RetNetForCausalLM, RetNetModel
 from fla.models.rodimus import RodimusConfig, RodimusForCausalLM, RodimusModel
+from fla.models.rola import RoLAConfig, RoLAForCausalLM, RoLAModel
 from fla.models.rwkv6 import RWKV6Config, RWKV6ForCausalLM, RWKV6Model
 from fla.models.rwkv7 import RWKV7Config, RWKV7ForCausalLM, RWKV7Model
 from fla.models.samba import SambaConfig, SambaForCausalLM, SambaModel
@@ -136,6 +137,9 @@ __all__ = [
     'RetNetConfig',
     'RetNetForCausalLM',
     'RetNetModel',
+    'RoLAConfig',
+    'RoLAForCausalLM',
+    'RoLAModel',
     'RodimusConfig',
     'RodimusForCausalLM',
     'RodimusModel',
