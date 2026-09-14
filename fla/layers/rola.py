@@ -49,11 +49,13 @@ if TYPE_CHECKING:
 @dataclass(frozen=True)
 class LevelRoutingConfig:
     """One routing level in plain fields: its width, each duty's activation, and whether the
-    duties share a projection.
+    duties share one solve.
 
-    ``read``/``write`` are ``'dense'`` (softmax) or ``'sparse'`` (entmax at ``alpha``). An
-    untied sparse/sparse level is ``rola``'s union routing (one support, the mass split
-    between the duties); every other combination is its independent routing.
+    ``read``/``write`` are ``'dense'`` (softmax) or ``'sparse'`` (entmax at ``alpha``). A tied
+    level is ``rola``'s tied routing (one activation serving both duties), so its read and
+    write name the same activation; an untied sparse/sparse level is its union routing (one
+    support, the mass split between the duties); every other combination is its independent
+    routing.
     """
 
     width: int
@@ -70,6 +72,9 @@ class LevelRoutingConfig:
         for side, value in (("read", self.read), ("write", self.write)):
             if value not in ("sparse", "dense"):
                 raise ValueError(f"LevelRoutingConfig.{side} must be 'sparse' or 'dense', got {value!r}")
+        if self.tied and self.read != self.write:
+            raise ValueError(f"a tied level runs one solve for both duties, so read and write must match; got "
+                             f"read={self.read!r}, write={self.write!r}")
 
     @classmethod
     def of(cls, spec: LevelRoutingConfig | dict) -> LevelRoutingConfig:
@@ -78,14 +83,15 @@ class LevelRoutingConfig:
 
     def level(self):
         """This level as ``rola``'s own level config."""
-        if not self.tied and self.read == "sparse" and self.write == "sparse":
-            return rola.UnionRouting(width=self.width, alpha=self.alpha)
 
         def activation(side: str):
             return rola.entmax(self.alpha) if side == "sparse" else rola.softmax()
 
-        return rola.IndependentRouting(width=self.width, read=activation(self.read),
-                                       write=activation(self.write), tied=self.tied)
+        if self.tied:
+            return rola.TiedRouting(width=self.width, op=activation(self.read))
+        if self.read == "sparse" and self.write == "sparse":
+            return rola.UnionRouting(width=self.width, alpha=self.alpha)
+        return rola.IndependentRouting(width=self.width, read=activation(self.read), write=activation(self.write))
 
 
 #: the decay sources a config can name, each ``rola``'s own class by name

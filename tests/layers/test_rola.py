@@ -37,12 +37,22 @@ def test_the_wrapper_holds_exactly_rolas_layer_built_from_the_same_arguments():
 
 
 def test_a_level_dict_and_its_dataclass_build_the_same_layer():
-    _, from_dict = _pair([{"width": 16, "read": "sparse", "tied": True, "alpha": 2.0}], None)
-    _, from_config = _pair([LevelRoutingConfig(width=16, read="sparse", tied=True, alpha=2.0)], None)
+    _, from_dict = _pair([{"width": 16, "read": "sparse", "write": "sparse", "tied": True, "alpha": 2.0}], None)
+    _, from_config = _pair([LevelRoutingConfig(width=16, read="sparse", write="sparse", tied=True, alpha=2.0)], None)
     assert all(torch.equal(from_dict[name], from_config[name]) for name in from_dict)
 
 
-@pytest.mark.parametrize("bad", [{"width": 0}, {"width": 8, "read": "soft"}, {"width": 8, "tied": 1}])
+def test_each_level_lowers_to_rolas_own_routing_type():
+    assert LevelRoutingConfig(width=8, read="sparse", write="sparse", tied=True, alpha=2.0).level() == \
+        rola.TiedRouting(width=8, op=rola.entmax(2.0))
+    assert LevelRoutingConfig(width=8, tied=True).level() == rola.TiedRouting(width=8, op=rola.softmax())
+    assert LevelRoutingConfig(width=8, read="sparse", write="sparse").level() == rola.UnionRouting(width=8, alpha=1.5)
+    assert LevelRoutingConfig(width=8, write="sparse").level() == \
+        rola.IndependentRouting(width=8, read=rola.softmax(), write=rola.entmax(1.5))
+
+
+@pytest.mark.parametrize("bad", [{"width": 0}, {"width": 8, "read": "soft"}, {"width": 8, "tied": 1},
+                                 {"width": 8, "read": "dense", "write": "sparse", "tied": True}])
 def test_a_malformed_level_is_refused_at_construction(bad):
     with pytest.raises((TypeError, ValueError)):
         LevelRoutingConfig.of(bad)
