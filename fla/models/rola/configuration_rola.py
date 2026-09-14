@@ -6,9 +6,9 @@
 #   https://github.com/fla-org/flash-linear-attention/graphs/contributors
 
 """RoLAConfig -- HF config for the RoLA causal LM. Mirrors GLAConfig (same backbone, MLP, norm and fuse
-fields); the sequence mixer is `fla.layers.RoLA`, described by its own construction arguments as plain data:
-the routing `levels` (each a `LevelRoutingConfig` dict), `head_v_dim`, `num_heads`, `decay`, `router_bias` and
-`gain_bias_init`."""
+fields); the sequence mixer is `fla.layers.RoLA`, described by its construction arguments, which are rola's own:
+the routing `levels` and the `decay` as the JSON of rola's objects (`fla.layers.rola.encode`), `d_v`, `num_heads`,
+`bias` and `gain_bias_init`."""
 from transformers.configuration_utils import PretrainedConfig
 
 
@@ -20,11 +20,11 @@ class RoLAConfig(PretrainedConfig):
     def __init__(
         self,
         # --- RoLA mixer (fla.layers.RoLA's arguments) ---
-        levels: list | None = None,                          # LevelRoutingConfig dicts, outermost first
-        head_v_dim: int = 64,
+        levels: list | None = None,                          # rola level types as JSON, outermost first
+        d_v: int = 64,
         num_heads: int = 8,
-        decay: dict | None = None,                           # None or {"source": "constant" | "learned", ...}
-        router_bias: bool = False,
+        decay: dict | None = None,                           # None or a rola decay source as JSON
+        bias: bool = False,
         gain_bias_init: float | None = None,
         # --- backbone (mirrors GLAConfig) ---
         hidden_size: int = 1024,
@@ -49,11 +49,13 @@ class RoLAConfig(PretrainedConfig):
         vocab_size: int = 32000,
         **kwargs,
     ):
-        self.levels = levels if levels is not None else [{"width": 16}]
-        self.head_v_dim = head_v_dim
+        self.levels = levels if levels is not None else [
+            {"type": "IndependentRouting", "width": 16, "read": {"type": "SoftmaxActivation"},
+             "write": {"type": "SoftmaxActivation"}}]
+        self.d_v = d_v
         self.num_heads = num_heads
         self.decay = decay
-        self.router_bias = router_bias
+        self.bias = bias
         self.gain_bias_init = gain_bias_init
 
         self.hidden_size = hidden_size

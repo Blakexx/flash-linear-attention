@@ -45,9 +45,9 @@ class RoLABlock(GradientCheckpointingLayer):
         self.layer_idx = layer_idx
 
         self.attn_norm = (RMSNorm if config.fuse_norm else nn.RMSNorm)(config.hidden_size, eps=config.norm_eps)
-        self.attn = RoLA(hidden_size=config.hidden_size, num_heads=config.num_heads, head_v_dim=config.head_v_dim,
-                         levels=config.levels, decay=config.decay, router_bias=config.router_bias,
-                         gain_bias_init=config.gain_bias_init, layer_idx=layer_idx)
+        self.attn = RoLA(hidden_size=config.hidden_size, num_heads=config.num_heads, levels=config.levels, d_v=config.d_v,
+                         decay=config.decay, bias=config.bias, gain_bias_init=config.gain_bias_init,
+                         layer_idx=layer_idx)
         self.mlp_norm = (RMSNorm if config.fuse_norm else nn.RMSNorm)(config.hidden_size, eps=config.norm_eps)
         self.mlp = GatedMLP(
             hidden_size=config.hidden_size,

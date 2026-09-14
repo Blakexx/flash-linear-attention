@@ -10,11 +10,13 @@ import pytest
 
 rola = pytest.importorskip("rola")
 
+from fla.layers.rola import encode  # noqa: E402
 from fla.models import RoLAConfig, RoLAForCausalLM  # noqa: E402
 
 
 def test_the_hf_model_is_built_from_the_config_and_the_config_round_trips():
-    config = RoLAConfig(levels=[{"width": 8}, {"width": 8, "write": "sparse"}], head_v_dim=64, num_heads=2,
+    config = RoLAConfig(levels=encode([rola.IndependentRouting(width=8, read=rola.softmax(), write=rola.softmax()),
+                                       rola.TiedRouting(width=8, op=rola.entmax(1.5))]), d_v=64, num_heads=2,
                         hidden_size=128, num_hidden_layers=2, vocab_size=100, fuse_cross_entropy=False,
                         fuse_norm=False, fuse_swiglu=False)
     model = RoLAForCausalLM(config)
@@ -25,7 +27,7 @@ def test_the_hf_model_is_built_from_the_config_and_the_config_round_trips():
 def test_the_model_saves_and_loads_through_the_auto_classes(tmp_path):
     from transformers import AutoModelForCausalLM
 
-    config = RoLAConfig(levels=[{"width": 8}], head_v_dim=64, num_heads=2, hidden_size=128, num_hidden_layers=1,
+    config = RoLAConfig(levels=encode([rola.UnionRouting(width=8)]), d_v=64, num_heads=2, hidden_size=128, num_hidden_layers=1,
                         vocab_size=100, fuse_cross_entropy=False, fuse_norm=False, fuse_swiglu=False)
     model = RoLAForCausalLM(config)
     model.save_pretrained(tmp_path)

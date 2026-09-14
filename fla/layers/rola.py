@@ -10,9 +10,10 @@
 ``rola`` owns the model -- the route producer, the recurrence, the op and its envelope.
 This file adds exactly what FLA's mixer contract needs and nothing that computes RoLA:
 
-1. a serializable construction surface: :class:`LevelRoutingConfig` names one routing level
-   in plain fields so an HF config can carry it, and ``decay`` is a plain dict naming one of
-   ``rola``'s decay sources;
+1. construction from ``rola``'s own objects: the routing levels are ``rola``'s level types
+   and the decay is one of its decay sources, each also accepted as its JSON (:func:`encode` /
+   :func:`decode`: the ``rola`` class by name and its own fields), so an HF config carries
+   exactly ``rola``'s vocabulary and nothing translates it;
 2. FLA's call convention: ``forward(hidden_states, attention_mask, past_key_values,
    use_cache, ...)`` returning ``(o, None, past_key_values)``, the layer's continuation
    carried in the cache's ``recurrent_state``;
@@ -27,8 +28,9 @@ rebuilt. There is no second implementation to fall back on.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import TYPE_CHECKING
+import dataclasses
+import inspect
+from typing import TYPE_CHECKING, Any
 
 import torch
 import torch.nn as nn
@@ -46,85 +48,56 @@ if TYPE_CHECKING:
     from fla.models.utils import Cache
 
 
-@dataclass(frozen=True)
-class LevelRoutingConfig:
-    """One routing level in plain fields: its width, each duty's activation, and whether the
-    duties share one solve.
-
-    ``read``/``write`` are ``'dense'`` (softmax) or ``'sparse'`` (entmax at ``alpha``). A tied
-    level is ``rola``'s tied routing (one activation serving both duties), so its read and
-    write name the same activation; an untied sparse/sparse level is its union routing (one
-    support, the mass split between the duties); every other combination is its independent
-    routing.
-    """
-
-    width: int
-    read: str = "dense"
-    write: str = "dense"
-    tied: bool = False
-    alpha: float = 1.5
-
-    def __post_init__(self) -> None:
-        if type(self.width) is not int or self.width < 1:
-            raise ValueError(f"LevelRoutingConfig.width must be a positive int, got {self.width!r}")
-        if type(self.tied) is not bool:
-            raise TypeError(f"LevelRoutingConfig.tied must be bool, got {self.tied!r}")
-        for side, value in (("read", self.read), ("write", self.write)):
-            if value not in ("sparse", "dense"):
-                raise ValueError(f"LevelRoutingConfig.{side} must be 'sparse' or 'dense', got {value!r}")
-        if self.tied and self.read != self.write:
-            raise ValueError(f"a tied level runs one solve for both duties, so read and write must match; got "
-                             f"read={self.read!r}, write={self.write!r}")
-
-    @classmethod
-    def of(cls, spec: LevelRoutingConfig | dict) -> LevelRoutingConfig:
-        """A config, or one built from its dict."""
-        return spec if isinstance(spec, cls) else cls(**spec)
-
-    def level(self):
-        """This level as ``rola``'s own level config."""
-
-        def activation(side: str):
-            return rola.entmax(self.alpha) if side == "sparse" else rola.softmax()
-
-        if self.tied:
-            return rola.TiedRouting(width=self.width, op=activation(self.read))
-        if self.read == "sparse" and self.write == "sparse":
-            return rola.UnionRouting(width=self.width, alpha=self.alpha)
-        return rola.IndependentRouting(width=self.width, read=activation(self.read), write=activation(self.write))
-
-
-#: the decay sources a config can name, each ``rola``'s own class by name
-DECAY_SOURCES = {"constant": "ConstantDecay", "learned": "LearnedDecay"}
-
-
 def _require_rola() -> None:
     if rola is None:
         raise ImportError("fla.layers.RoLA needs the `rola` package (https://github.com/Blakexx/rola)")
 
 
-def decay_source(decay: dict | None, widths: tuple[int, ...], num_heads: int):
-    """``None``, or ``{"source": "constant" | "learned", **its arguments}`` as that decay source."""
-    if decay is None:
-        return None
-    arguments = dict(decay)
-    source = arguments.pop("source", None)
-    if source not in DECAY_SOURCES:
-        raise ValueError(f"decay['source'] must be one of {sorted(DECAY_SOURCES)}, got {source!r}")
-    return getattr(rola, DECAY_SOURCES[source])(**arguments, widths=widths, num_heads=num_heads)
+def encode(value: Any) -> Any:
+    """A ``rola`` routing value as JSON: ``{"type": <its rola class>, **its constructor fields}``, recursively.
+
+    Plain values and lists pass through. A decay source is written the same way by hand (its class and its own
+    arguments), since its ``widths`` and ``num_heads`` are derived from the levels when it is built.
+    """
+    if dataclasses.is_dataclass(value) and not isinstance(value, type):
+        return {"type": type(value).__name__,
+                **{f.name: encode(getattr(value, f.name)) for f in dataclasses.fields(value) if f.init}}
+    if isinstance(value, (list, tuple)):
+        return [encode(item) for item in value]
+    return value
+
+
+def decode(blob: Any, **derived: Any) -> Any:
+    """The ``rola`` object a JSON blob names: ``rola.<type>`` built from its decoded fields, plus whichever of the
+    ``derived`` arguments its constructor takes. ``rola`` objects, plain values and lists pass through."""
+    if isinstance(blob, (list, tuple)):
+        return [decode(item) for item in blob]
+    if not isinstance(blob, dict) or "type" not in blob:
+        return blob
+    _require_rola()
+    name = blob["type"]
+    if name not in rola.__all__:
+        raise ValueError(f"{name!r} is not a type the rola package exports")
+    cls = getattr(rola, name)
+    arguments = {key: decode(value) for key, value in blob.items() if key != "type"}
+    accepted = inspect.signature(cls).parameters
+    arguments.update({key: value for key, value in derived.items() if key in accepted and key not in arguments})
+    return cls(**arguments)
 
 
 class RoLA(nn.Module):
-    """Routed linear attention as an FLA mixer.
+    """Routed linear attention as an FLA mixer, over ``rola.RoLA`` built from ``rola.RouteProducer``.
 
     Args:
-        hidden_size: model width.
-        num_heads: heads.
-        head_v_dim: per-head value width (``rola.RoLA``'s ``d_v``).
-        levels: the routing levels, outermost first, as :class:`LevelRoutingConfig` or its dict.
-        decay: ``None``, or a dict naming a decay source (:data:`DECAY_SOURCES`) and its arguments.
-        router_bias: bias on the route projection.
-        gain_bias_init: the side gain's bias initialization (``rola.RouteProducer``).
+        hidden_size: model width (``rola.RouteProducer``'s ``hidden_size``).
+        num_heads: heads (``rola.RouteProducer``'s ``num_heads``).
+        levels: the routing levels, outermost first: ``rola.IndependentRouting`` / ``rola.TiedRouting`` /
+            ``rola.UnionRouting``, or their JSON.
+        d_v: per-head value width (``rola.RoLA``'s ``d_v``).
+        decay: ``None``, a ``rola`` decay source, or its JSON (``{"type": "LearnedDecay", "target_leaf_rate": ...}``);
+            its ``widths`` and ``num_heads`` come from the levels.
+        bias: bias on the route projection (``rola.RouteProducer``'s ``bias``).
+        gain_bias_init: the side gain's bias initialization (``rola.RouteProducer``'s ``gain_bias_init``).
         layer_idx: this layer's index in the cache.
     """
 
@@ -132,23 +105,23 @@ class RoLA(nn.Module):
         self,
         hidden_size: int = 1024,
         num_heads: int = 8,
-        head_v_dim: int = 64,
-        levels: tuple[LevelRoutingConfig | dict, ...] = (LevelRoutingConfig(width=16),),
-        decay: dict | None = None,
-        router_bias: bool = False,
+        levels: list | tuple = ({"type": "IndependentRouting", "width": 16, "read": {"type": "SoftmaxActivation"},
+                                 "write": {"type": "SoftmaxActivation"}},),
+        d_v: int = 64,
+        decay: Any = None,
+        bias: bool = False,
         gain_bias_init: float | None = None,
         layer_idx: int | None = None,
     ) -> None:
         super().__init__()
         _require_rola()
-        self.levels = tuple(LevelRoutingConfig.of(level) for level in levels)
-        routes = rola.RouteProducer([level.level() for level in self.levels], hidden_size=hidden_size,
-                                    num_heads=num_heads, bias=router_bias, gain_bias_init=gain_bias_init)
-        self.layer = rola.RoLA(routes, d_v=head_v_dim, layer_idx=layer_idx,
-                               decay=decay_source(decay, routes.topology.widths, num_heads))
+        routes = rola.RouteProducer(decode(list(levels)), hidden_size=hidden_size, num_heads=num_heads, bias=bias,
+                                    gain_bias_init=gain_bias_init)
+        decay = decode(decay, widths=routes.topology.widths, num_heads=num_heads)
+        self.layer = rola.RoLA(routes, d_v=d_v, decay=decay, layer_idx=layer_idx)
         self.hidden_size = hidden_size
         self.num_heads = num_heads
-        self.head_v_dim = head_v_dim
+        self.d_v = d_v
         self.layer_idx = layer_idx
 
     @property
@@ -188,4 +161,4 @@ class RoLA(nn.Module):
         return self.layer.state_size(sequence_length)
 
 
-__all__ = ["DECAY_SOURCES", "LevelRoutingConfig", "RoLA", "decay_source"]
+__all__ = ["RoLA", "decode", "encode"]
