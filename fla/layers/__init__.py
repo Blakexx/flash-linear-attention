@@ -38,7 +38,7 @@ from .path_attn import PaTHAttention
 from .raven import Raven
 from .rebased import ReBasedLinearAttention
 from .rodimus import RodimusAttention, SlidingWindowSharedKeyAttention
-from .rola import RoLA
+from .fsla import FSLA
 from .rwkv6 import RWKV6Attention
 from .rwkv7 import RWKV7Attention
 from .wall_attn import WallAttention
@@ -79,7 +79,7 @@ __all__ = [
     'RWKV7Attention',
     'Raven',
     'ReBasedLinearAttention',
-    'RoLA',
+    'FSLA',
     'RodimusAttention',
     'SlidingWindowSharedKeyAttention',
     'WallAttention',

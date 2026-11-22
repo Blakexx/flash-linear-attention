@@ -5,25 +5,25 @@
 # For a list of all contributors, visit:
 #   https://github.com/fla-org/flash-linear-attention/graphs/contributors
 
-"""RoLAConfig -- HF config for the RoLA causal LM. Mirrors GLAConfig (same backbone, MLP, norm and fuse
-fields); the sequence mixer is `fla.layers.RoLA`, described by its construction arguments, which are rola's own:
-the routing `levels` and the `decay` as the JSON of rola's objects (`fla.layers.rola.encode`), `d_v`, `num_heads`,
+"""FSLAConfig -- HF config for the FSLA causal LM. Mirrors GLAConfig (same backbone, MLP, norm and fuse
+fields); the sequence mixer is `fla.layers.FSLA`, described by its construction arguments, which are fsla's own:
+the routing `levels` and the `decay` as the JSON of fsla's objects (`fla.layers.fsla.encode`), `d_v`, `num_heads`,
 `bias` and `gain_bias_init`."""
 from transformers.configuration_utils import PretrainedConfig
 
 
-class RoLAConfig(PretrainedConfig):
+class FSLAConfig(PretrainedConfig):
 
-    model_type = 'rola'
+    model_type = 'fsla'
     keys_to_ignore_at_inference = ['past_key_values']
 
     def __init__(
         self,
-        # --- RoLA mixer (fla.layers.RoLA's arguments) ---
-        levels: list | None = None,                          # rola level types as JSON, outermost first
+        # --- FSLA mixer (fla.layers.FSLA's arguments) ---
+        levels: list | None = None,                          # fsla level types as JSON, outermost first
         d_v: int = 64,
         num_heads: int = 8,
-        decay: dict | None = None,                           # None or a rola decay source as JSON
+        decay: dict | None = None,                           # None or a fsla decay source as JSON
         bias: bool = False,
         gain_bias_init: float | None = None,
         # --- backbone (mirrors GLAConfig) ---

@@ -5,25 +5,25 @@
 # For a list of all contributors, visit:
 #   https://github.com/fla-org/flash-linear-attention/graphs/contributors
 
-"""RoLA in FLA's mixer contract: a thin wrapper over the standalone ``rola`` package's layer.
+"""FSLA in FLA's mixer contract: a thin wrapper over the standalone ``fsla`` package's layer.
 
-``rola`` owns the model -- the route producer, the recurrence, the op and its envelope.
-This file adds exactly what FLA's mixer contract needs and nothing that computes RoLA:
+``fsla`` owns the model -- the route producer, the recurrence, the op and its envelope.
+This file adds exactly what FLA's mixer contract needs and nothing that computes FSLA:
 
-1. construction from ``rola``'s own objects: the routing levels are ``rola``'s level types
+1. construction from ``fsla``'s own objects: the routing levels are ``fsla``'s level types
    and the decay is one of its decay sources, each also accepted as its JSON (:func:`encode` /
-   :func:`decode`: the ``rola`` class by name and its own fields), so an HF config carries
-   exactly ``rola``'s vocabulary and nothing translates it;
+   :func:`decode`: the ``fsla`` class by name and its own fields), so an HF config carries
+   exactly ``fsla``'s vocabulary and nothing translates it;
 2. FLA's call convention: ``forward(hidden_states, attention_mask, past_key_values,
    use_cache, ...)`` returning ``(o, None, past_key_values)``, the layer's continuation
    carried in the cache's ``recurrent_state``;
 3. FLA's state accounting: ``get_stats`` / ``state_size``, read off the wrapped layer.
 
-What ``rola`` refuses, this refuses, by passing the call through: a configuration outside
+What ``fsla`` refuses, this refuses, by passing the call through: a configuration outside
 the built envelope, training before the native backward, prefill while the kernel is
 rebuilt. There is no second implementation to fall back on.
 
-``rola`` is an optional dependency: ``fla`` imports without it, and constructing :class:`RoLA` without it raises.
+``fsla`` is an optional dependency: ``fla`` imports without it, and constructing :class:`FSLA` without it raises.
 """
 
 from __future__ import annotations
@@ -38,9 +38,9 @@ import torch.nn as nn
 from fla.layers.utils import get_layer_cache, update_layer_cache
 
 try:
-    import rola
+    import fsla
 except ImportError:
-    rola = None
+    fsla = None
 
 if TYPE_CHECKING:
     from transformers.processing_utils import Unpack
@@ -48,13 +48,13 @@ if TYPE_CHECKING:
     from fla.models.utils import Cache
 
 
-def _require_rola() -> None:
-    if rola is None:
-        raise ImportError("fla.layers.RoLA needs the `rola` package (https://github.com/Blakexx/rola)")
+def _require_fsla() -> None:
+    if fsla is None:
+        raise ImportError("fla.layers.FSLA needs the `fsla` package (https://github.com/Blakexx/fsla)")
 
 
 def encode(value: Any) -> Any:
-    """A ``rola`` routing value as JSON: ``{"type": <its rola class>, **its constructor fields}``, recursively.
+    """A ``fsla`` routing value as JSON: ``{"type": <its fsla class>, **its constructor fields}``, recursively.
 
     Plain values and lists pass through. A decay source is written the same way by hand (its class and its own
     arguments), since its ``widths`` and ``num_heads`` are derived from the levels when it is built.
@@ -68,36 +68,36 @@ def encode(value: Any) -> Any:
 
 
 def decode(blob: Any, **derived: Any) -> Any:
-    """The ``rola`` object a JSON blob names: ``rola.<type>`` built from its decoded fields, plus whichever of the
-    ``derived`` arguments its constructor takes. ``rola`` objects, plain values and lists pass through."""
+    """The ``fsla`` object a JSON blob names: ``fsla.<type>`` built from its decoded fields, plus whichever of the
+    ``derived`` arguments its constructor takes. ``fsla`` objects, plain values and lists pass through."""
     if isinstance(blob, (list, tuple)):
         return [decode(item) for item in blob]
     if not isinstance(blob, dict) or "type" not in blob:
         return blob
-    _require_rola()
+    _require_fsla()
     name = blob["type"]
-    if name not in rola.__all__:
-        raise ValueError(f"{name!r} is not a type the rola package exports")
-    cls = getattr(rola, name)
+    if name not in fsla.__all__:
+        raise ValueError(f"{name!r} is not a type the fsla package exports")
+    cls = getattr(fsla, name)
     arguments = {key: decode(value) for key, value in blob.items() if key != "type"}
     accepted = inspect.signature(cls).parameters
     arguments.update({key: value for key, value in derived.items() if key in accepted and key not in arguments})
     return cls(**arguments)
 
 
-class RoLA(nn.Module):
-    """Routed linear attention as an FLA mixer, over ``rola.RoLA`` built from ``rola.RouteProducer``.
+class FSLA(nn.Module):
+    """Routed linear attention as an FLA mixer, over ``fsla.FSLA`` built from ``fsla.RouteProducer``.
 
     Args:
-        hidden_size: model width (``rola.RouteProducer``'s ``hidden_size``).
-        num_heads: heads (``rola.RouteProducer``'s ``num_heads``).
-        levels: the routing levels, outermost first: ``rola.IndependentRouting`` / ``rola.TiedRouting`` /
-            ``rola.UnionRouting``, or their JSON.
-        d_v: per-head value width (``rola.RoLA``'s ``d_v``).
-        decay: ``None``, a ``rola`` decay source, or its JSON (``{"type": "LearnedDecay", "target_leaf_rate": ...}``);
+        hidden_size: model width (``fsla.RouteProducer``'s ``hidden_size``).
+        num_heads: heads (``fsla.RouteProducer``'s ``num_heads``).
+        levels: the routing levels, outermost first: ``fsla.IndependentRouting`` / ``fsla.TiedRouting`` /
+            ``fsla.UnionRouting``, or their JSON.
+        d_v: per-head value width (``fsla.FSLA``'s ``d_v``).
+        decay: ``None``, a ``fsla`` decay source, or its JSON (``{"type": "LearnedDecay", "target_leaf_rate": ...}``);
             its ``widths`` and ``num_heads`` come from the levels.
-        bias: bias on the route projection (``rola.RouteProducer``'s ``bias``).
-        gain_bias_init: the side gain's bias initialization (``rola.RouteProducer``'s ``gain_bias_init``).
+        bias: bias on the route projection (``fsla.RouteProducer``'s ``bias``).
+        gain_bias_init: the side gain's bias initialization (``fsla.RouteProducer``'s ``gain_bias_init``).
         layer_idx: this layer's index in the cache.
     """
 
@@ -114,11 +114,11 @@ class RoLA(nn.Module):
         layer_idx: int | None = None,
     ) -> None:
         super().__init__()
-        _require_rola()
-        routes = rola.RouteProducer(decode(list(levels)), hidden_size=hidden_size, num_heads=num_heads, bias=bias,
+        _require_fsla()
+        routes = fsla.RouteProducer(decode(list(levels)), hidden_size=hidden_size, num_heads=num_heads, bias=bias,
                                     gain_bias_init=gain_bias_init)
         decay = decode(decay, widths=routes.topology.widths, num_heads=num_heads)
-        self.layer = rola.RoLA(routes, d_v=d_v, decay=decay, layer_idx=layer_idx)
+        self.layer = fsla.FSLA(routes, d_v=d_v, decay=decay, layer_idx=layer_idx)
         self.hidden_size = hidden_size
         self.num_heads = num_heads
         self.d_v = d_v
@@ -142,12 +142,12 @@ class RoLA(nn.Module):
         **kwargs: Unpack[dict],
     ) -> tuple[torch.Tensor, None, Cache | None]:
         if output_attentions:
-            raise NotImplementedError("RoLA has no attention matrix to return")
+            raise NotImplementedError("FSLA has no attention matrix to return")
         cached = get_layer_cache(self, past_key_values)
         if cached is not None and cached["recurrent_state"] is not None:
-            continuation = rola.LayerContinuation(state=cached["recurrent_state"])
+            continuation = fsla.LayerContinuation(state=cached["recurrent_state"])
         else:
-            continuation = rola.LayerContinuation(state=rola.state()) if use_cache else None
+            continuation = fsla.LayerContinuation(state=fsla.state()) if use_cache else None
         o, continuation = self.layer(hidden_states, attention_mask, continuation, **kwargs)
         if use_cache:
             update_layer_cache(self, past_key_values, recurrent_state=continuation.state,
@@ -161,4 +161,4 @@ class RoLA(nn.Module):
         return self.layer.state_size(sequence_length)
 
 
-__all__ = ["RoLA", "decode", "encode"]
+__all__ = ["FSLA", "decode", "encode"]

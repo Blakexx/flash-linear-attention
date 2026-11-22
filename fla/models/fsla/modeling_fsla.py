@@ -5,8 +5,8 @@
 # For a list of all contributors, visit:
 #   https://github.com/fla-org/flash-linear-attention/graphs/contributors
 
-"""RoLAForCausalLM -- HF causal LM with RoLA sequence mixers. Mirrors GLA's modeling (RMSNorm + mixer + GatedMLP
-blocks, fused losses, FLA cache/generation); the mixer is `fla.layers.RoLA`, which returns the FLA 3-tuple."""
+"""FSLAForCausalLM -- HF causal LM with FSLA sequence mixers. Mirrors GLA's modeling (RMSNorm + mixer + GatedMLP
+blocks, fused losses, FLA cache/generation); the mixer is `fla.layers.FSLA`, which returns the FLA 3-tuple."""
 from __future__ import annotations
 
 import math
@@ -20,8 +20,8 @@ from transformers.modeling_utils import PreTrainedModel
 from transformers.utils import logging
 from transformers.utils.deprecation import deprecate_kwarg
 
-from fla.layers.rola import RoLA
-from fla.models.rola.configuration_rola import RoLAConfig
+from fla.layers.fsla import FSLA
+from fla.models.fsla.configuration_fsla import FSLAConfig
 from fla.models.utils import Cache, FLAUnsupportedCacheGenerationMixin
 from fla.modules import FusedCrossEntropyLoss, FusedLinearCrossEntropyLoss, GatedMLP, RMSNorm
 from fla.modules.l2warp import l2_warp
@@ -37,15 +37,15 @@ except ImportError:
 logger = logging.get_logger(__name__)
 
 
-class RoLABlock(GradientCheckpointingLayer):
+class FSLABlock(GradientCheckpointingLayer):
 
-    def __init__(self, config: RoLAConfig, layer_idx: int):
+    def __init__(self, config: FSLAConfig, layer_idx: int):
         super().__init__()
         self.config = config
         self.layer_idx = layer_idx
 
         self.attn_norm = (RMSNorm if config.fuse_norm else nn.RMSNorm)(config.hidden_size, eps=config.norm_eps)
-        self.attn = RoLA(hidden_size=config.hidden_size, num_heads=config.num_heads, levels=config.levels, d_v=config.d_v,
+        self.attn = FSLA(hidden_size=config.hidden_size, num_heads=config.num_heads, levels=config.levels, d_v=config.d_v,
                          decay=config.decay, bias=config.bias, gain_bias_init=config.gain_bias_init,
                          layer_idx=layer_idx)
         self.mlp_norm = (RMSNorm if config.fuse_norm else nn.RMSNorm)(config.hidden_size, eps=config.norm_eps)
@@ -88,12 +88,12 @@ class RoLABlock(GradientCheckpointingLayer):
         return (hidden_states, attentions, past_key_values)
 
 
-class RoLAPreTrainedModel(PreTrainedModel):
+class FSLAPreTrainedModel(PreTrainedModel):
 
-    config_class = RoLAConfig
+    config_class = FSLAConfig
     base_model_prefix = 'model'
     supports_gradient_checkpointing = True
-    _no_split_modules = ['RoLABlock']
+    _no_split_modules = ['FSLABlock']
     _supports_cache_class = True
 
     def __init__(self, *inputs, **kwargs):
@@ -131,15 +131,15 @@ class RoLAPreTrainedModel(PreTrainedModel):
                     raise ValueError(f"Invalid prenorm_residual_strategy: {prenorm_residual_strategy}")
 
 
-class RoLAModel(RoLAPreTrainedModel):
+class FSLAModel(FSLAPreTrainedModel):
 
-    def __init__(self, config: RoLAConfig):
+    def __init__(self, config: FSLAConfig):
         super().__init__(config)
         self.padding_idx = config.pad_token_id
         self.vocab_size = config.vocab_size
 
         self.embeddings = nn.Embedding(config.vocab_size, config.hidden_size, self.padding_idx)
-        self.layers = nn.ModuleList([RoLABlock(config, layer_idx) for layer_idx in range(config.num_hidden_layers)])
+        self.layers = nn.ModuleList([FSLABlock(config, layer_idx) for layer_idx in range(config.num_hidden_layers)])
         self.norm = (RMSNorm if config.fuse_norm else nn.RMSNorm)(config.hidden_size, eps=config.norm_eps)
 
         self.gradient_checkpointing = False
@@ -165,7 +165,7 @@ class RoLAModel(RoLAPreTrainedModel):
         **kwargs: Unpack[dict],
     ) -> tuple | BaseModelOutputWithPast:
         if output_attentions:
-            warnings.warn("`RoLAModel` does not `output_attentions` now, setting it to `False`.")
+            warnings.warn("`FSLAModel` does not `output_attentions` now, setting it to `False`.")
             output_attentions = False
         output_hidden_states = output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
         use_cache = use_cache if use_cache is not None else (self.config.use_cache if not self.training else False)
@@ -211,13 +211,13 @@ class RoLAModel(RoLAPreTrainedModel):
         )
 
 
-class RoLAForCausalLM(RoLAPreTrainedModel, FLAUnsupportedCacheGenerationMixin):
+class FSLAForCausalLM(FSLAPreTrainedModel, FLAUnsupportedCacheGenerationMixin):
 
     _tied_weights_keys = ["lm_head.weight"]
 
     def __init__(self, config):
         super().__init__(config)
-        self.model = RoLAModel(config)
+        self.model = FSLAModel(config)
         self.vocab_size = config.vocab_size
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
         self.criterion = None

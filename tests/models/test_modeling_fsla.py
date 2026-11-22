@@ -5,33 +5,33 @@
 # For a list of all contributors, visit:
 #   https://github.com/fla-org/flash-linear-attention/graphs/contributors
 
-"""RoLA's HF model: built from its config, every block's mixer rola's own layer, the config round-tripping."""
+"""FSLA's HF model: built from its config, every block's mixer fsla's own layer, the config round-tripping."""
 import pytest
 
-rola = pytest.importorskip("rola")
+fsla = pytest.importorskip("fsla")
 
-from fla.layers.rola import encode  # noqa: E402
-from fla.models import RoLAConfig, RoLAForCausalLM  # noqa: E402
+from fla.layers.fsla import encode  # noqa: E402
+from fla.models import FSLAConfig, FSLAForCausalLM  # noqa: E402
 
 
 def test_the_hf_model_is_built_from_the_config_and_the_config_round_trips():
-    config = RoLAConfig(levels=encode([rola.IndependentRouting(width=8, read=rola.softmax(), write=rola.softmax()),
-                                       rola.TiedRouting(width=8, op=rola.entmax(1.5))]), d_v=64, num_heads=2,
+    config = FSLAConfig(levels=encode([fsla.IndependentRouting(width=8, read=fsla.softmax(), write=fsla.softmax()),
+                                       fsla.TiedRouting(width=8, op=fsla.entmax(1.5))]), d_v=64, num_heads=2,
                         hidden_size=128, num_hidden_layers=2, vocab_size=100, fuse_cross_entropy=False,
                         fuse_norm=False, fuse_swiglu=False)
-    model = RoLAForCausalLM(config)
-    assert [type(block.attn.layer) for block in model.model.layers] == [rola.RoLA, rola.RoLA]
-    assert RoLAConfig.from_dict(config.to_dict()).levels == config.levels
+    model = FSLAForCausalLM(config)
+    assert [type(block.attn.layer) for block in model.model.layers] == [fsla.FSLA, fsla.FSLA]
+    assert FSLAConfig.from_dict(config.to_dict()).levels == config.levels
 
 
 def test_the_model_saves_and_loads_through_the_auto_classes(tmp_path):
     from transformers import AutoModelForCausalLM
 
-    config = RoLAConfig(levels=encode([rola.UnionRouting(width=8)]), d_v=64, num_heads=2, hidden_size=128, num_hidden_layers=1,
+    config = FSLAConfig(levels=encode([fsla.UnionRouting(width=8)]), d_v=64, num_heads=2, hidden_size=128, num_hidden_layers=1,
                         vocab_size=100, fuse_cross_entropy=False, fuse_norm=False, fuse_swiglu=False)
-    model = RoLAForCausalLM(config)
+    model = FSLAForCausalLM(config)
     model.save_pretrained(tmp_path)
     loaded = AutoModelForCausalLM.from_pretrained(tmp_path)
-    assert type(loaded) is RoLAForCausalLM
+    assert type(loaded) is FSLAForCausalLM
     saved, restored = model.state_dict(), loaded.state_dict()
     assert sorted(saved) == sorted(restored) and all(saved[k].equal(restored[k]) for k in saved)
